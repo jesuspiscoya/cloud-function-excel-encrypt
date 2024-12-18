@@ -1,9 +1,11 @@
 ﻿using ClosedXML.Excel;
+using DocumentFormat.OpenXml.Office2010.Excel;
 using FnImportExcel.Configuration;
 using FnImportExcel.Utils;
 using Google.Cloud.Functions.Framework;
 using Microsoft.AspNetCore.Http;
 using MySql.Data.MySqlClient;
+using System.Diagnostics;
 using System.Text.Json;
 
 namespace FnImportExcel;
@@ -14,8 +16,12 @@ public class Function : IHttpFunction
     {
         System.Console.WriteLine("\nINIT\n");
 
+        Env _env = new Env();
+
         // Ruta del archivo Excel
-        string filePath = @"C:\Users\jpiscoya\Desktop\Libro1.xlsx";
+        string sourcePath = _env.SourcePath;
+        string fileName= _env.FileName;
+        string sheetName= _env.SheetName;
 
         // Conexión a la base de datos MySQL
         string connectionString = new Env().DBServer;
@@ -34,40 +40,39 @@ public class Function : IHttpFunction
             {
                 // Abrir conexión a MySQL
                 conn.Open();
-
                 
                 // Abrir el archivo Excel
-                using (var workbook = new XLWorkbook(filePath))
+                using (var workbook = new XLWorkbook(sourcePath + fileName))
                 {
                     // Obtener la primera hoja de trabajo
-                    var worksheet = workbook.Worksheet(1);
+                    var worksheet = workbook.Worksheet(sheetName);
 
                     // Obtener los encabezados de la primera fila
-                    List<String> columns = worksheet.Row(1).CellsUsed().Select(cell => cell.Value.ToString()).ToList();
-                    List<List<String>> rows = worksheet.RowsUsed().Skip(1).Select(row => row.Cells().Select(cell => cell.Value.ToString()).ToList()).ToList();
-                    List<string> stmnCols = Enumerable.Range(0, columns.Count).Select(i => $"@col{i}").ToList();
-                    string query = $"INSERT INTO cobertura ({string.Join(", ", columns)}) VALUES({string.Join(", ", stmnCols)})";
+                    string query = "UPDATE BudgetDetail SET Salary = @col1 WHERE EmployeeId = @col2";
 
-                    foreach (var row in rows)
+                    foreach (var row in worksheet.RowsUsed().Skip(3))
                     {
                         using (MySqlCommand cmd = new MySqlCommand(query, conn))
                         {
-                            for (int i = 0; i < row.Count; i++)
-                            {
-                                // Encriptar el contenido
-                                string? valueEncrypted = encryptionUtil.Encrypt(row[i]);
-                                cmd.Parameters.AddWithValue($"@col{i}", valueEncrypted);
-                            }
+                            string employeeId = row.Cell(6).GetValue<string>();
+                            string salary = row.Cell(15).GetValue<string>();
+
+                            // Encriptar el contenido
+                            string? salaryEncrypted = encryptionUtil.Encrypt(salary);
+                            cmd.Parameters.AddWithValue($"@col1", salaryEncrypted);
+                            cmd.Parameters.AddWithValue($"@col2", employeeId);
 
                             // Ejecutar la consulta
                             cmd.ExecuteNonQuery();
 
-                            Console.WriteLine($"Fila insertada correctamente: {JsonSerializer.Serialize(row)}");
+                            Console.WriteLine($"Fila insertada correctamente: [{employeeId}, {salary}]");
                         }
                     }
                 }
 
-                string query2 = "SELECT EmployeeId, Salary FROM BudgetDetail";
+                //Desencriptar salarios
+                /*
+                string query2 = "SELECT EmployeeId, Salary FROM BudgetDetail LIMIT 3";
                 using (MySqlCommand cmd = new MySqlCommand(query2, conn))
                 {
                     // Ejecutar la consulta y obtener el DataReader
@@ -78,34 +83,28 @@ public class Function : IHttpFunction
                         {
                             // Obtener los datos de las columnas por nombre
                             string id = reader.GetString("EmployeeId");
-                            string budget = reader.GetString("BudgetDetail");
+                            string salary = reader.GetString("Salary");
 
-                            string? idDecrypted = encryptionUtil.Decrypt(reader.GetString("EmployeeId"));
-                            string? budgetDecrypted = encryptionUtil.Decrypt(reader.GetString("BudgetDetail"));
+                            string? salaryDecrypted = encryptionUtil.Decrypt(reader.GetString("Salary"));
 
                             // Mostrar los resultados antes de desencriptar
                             Console.WriteLine("\nANTES DE DESENCRIPTAR:");
-                            Console.WriteLine($"Distribuidora (RSA): {id}");
-                            Console.WriteLine("--------------------------------------------------------------------------");
-                            Console.WriteLine($"IDGrupo (RSA): {budget}");
-                            Console.WriteLine("--------------------------------------------------------------------------");
+                            Console.WriteLine($"EmployeeId: {id}");
+                            Console.WriteLine($"Salary (RSA): {salary}");
 
                             Console.WriteLine("\nDESPUES DE DESENCRIPTAR:");
-                            if (!string.IsNullOrEmpty(idDecrypted))
+                            if (!string.IsNullOrEmpty(salaryDecrypted))
                             {
-                                Console.WriteLine($"Resultado Distribuidora: {idDecrypted}");
-                            }
-                            if (!string.IsNullOrEmpty(budgetDecrypted))
-                            {
-                                Console.WriteLine($"Resultado IDGrupo: {budgetDecrypted}");
+                                Console.WriteLine($"Resultado Salary: {salaryDecrypted}");
                             }
                             else
                             {
                                 Console.WriteLine("Error al desencriptar el contenido.");
                             }
+                            Console.WriteLine("--------------------------------------------------------------------------");
                         }
                     }
-                }
+                }*/
             }
             catch (Exception ex)
             {
